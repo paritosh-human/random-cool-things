@@ -20,6 +20,19 @@ case "$MODEL_ID" in
   *glm-4.7*)   SIZE=200000 ;;   # verified 200K context
 esac
 
+# Token counts can flicker to 0 while a turn is generating: Claude Code emits a
+# transient status payload whose context_window fields are absent mid-turn, so
+# the "// 0" fallbacks flash the bar empty. Hold the last known-good counts per
+# session so the bar stays steady mid-turn and refreshes when the reply lands.
+SID=$(echo "$input" | jq -r '.session_id // "default"')
+CACHE_DIR="${TMPDIR:-/tmp}/cc-statusline"; [ -d "$CACHE_DIR" ] || mkdir -p "$CACHE_DIR" 2>/dev/null
+CACHE_FILE="$CACHE_DIR/$SID"
+if [ "$INPUT_TOKENS" -gt 0 ] || [ "$OUTPUT_TOKENS" -gt 0 ]; then
+  printf '%s %s %s\n' "$INPUT_TOKENS" "$OUTPUT_TOKENS" "$SIZE" > "$CACHE_FILE" 2>/dev/null   # remember
+else
+  [ -f "$CACHE_FILE" ] && read INPUT_TOKENS OUTPUT_TOKENS SIZE < "$CACHE_FILE"                # reuse
+fi
+
 # ANSI colors
 C='\033[36m'; G='\033[32m'; Y='\033[33m'; R='\033[31m'; D='\033[90m'; B='\033[1m'; X='\033[0m'
 

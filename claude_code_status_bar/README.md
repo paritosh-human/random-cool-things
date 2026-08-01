@@ -51,6 +51,9 @@ Requires `jq` (and `git` for the branch segment).
 
 - The statusline is a **local** script — it never calls the model, so it costs
   **zero tokens**.
+- Token counts are cached per session, so the context bar holds steady while a
+  reply is generating instead of flickering to 0 (Claude Code omits the
+  `context_window` fields mid-turn). Cache lives in `$TMPDIR/cc-statusline/`.
 - Built against the **z.ai GLM proxy**; on that backend `rate_limits.*` won't
   appear and live cost may read `$0.00`. Works on plain Anthropic too.
 - Some backends report a generic 200K window for unknown models, so the script
