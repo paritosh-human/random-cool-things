@@ -8,12 +8,13 @@ It reads the session JSON Claude Code pipes in on stdin and renders a single
 colored line:
 
 ```
-🤖 model  🧠 effort  ⚡fast  │  📁 folder > 🌿 branch  │  ▰▰▰▰▰▱▱▱▱ NN% (↑Nk ↓Nk/total)  │  💸 $cost  │  ⏱️ session time  │  🌅 greeting
+🤖 model  🧠 ●●○○○  ⚡  │  📁 folder > 🌿 branch  │  ▰▰▰▰▰▱▱▱▱ NN% (↑Nk ↓Nk/total)  │  💸 $cost  │  ⏱️ session time  │  🌅 greeting
 ```
 
 ## What it shows
 
-- **Model** (cyan, bold) plus optional `🧠 effort` and `⚡ fast` badges.
+- **Model** (cyan, bold) plus optional badges: `🧠 ●●○○○` effort, shown as a
+  compact 5-dot meter (`●`/`○` from low → max), and a bare `⚡` for fast mode.
 - **Location** — current folder and git branch, joined by `>`.
 - **Context bar** — 10 blocks × 8 sub-steps (80 levels). The filled portion
   splits into **input** (lighter shade) then **output** (darker shade); the rest

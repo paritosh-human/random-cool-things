@@ -98,8 +98,21 @@ COST_FMT=$(printf '$%.2f' "$COST")
 BRANCH=""
 git rev-parse --git-dir >/dev/null 2>&1 && BRANCH=" ${D}> 🌿 $(git branch --show-current 2>/dev/null)${X}"
 
-# Optional badges
-TAG=""; [ -n "$EFF" ] && TAG=" ${D}🧠 ${EFF}${X}"; [ "$FAST" = "true" ] && TAG="$TAG ${Y}⚡ fast${X}"
+# Optional badges — effort as a compact 5-dot meter (●/○), fast as a bare bolt.
+case "$EFF" in
+  low)    EFF_S="●○○○○" ;;
+  medium) EFF_S="●●○○○" ;;
+  high)   EFF_S="●●●○○" ;;
+  xhigh)  EFF_S="●●●●○" ;;
+  max)    EFF_S="●●●●●" ;;
+  *)      EFF_S="$EFF" ;;
+esac
+TAG=""
+[ -n "$EFF" ] && TAG=" ${D}🧠 ${EFF_S}${X}"
+if [ "$FAST" = "true" ]; then
+  # bolt sits flush against the effort meter; standalone (with a leading space) otherwise
+  [ -n "$TAG" ] && TAG="${TAG}${Y}⚡${X}" || TAG=" ${Y}⚡${X}"
+fi
 
 # Dim separator between major groups (model · location · context · spend · time · greeting)
 SEP=" ${D}│${X} "
