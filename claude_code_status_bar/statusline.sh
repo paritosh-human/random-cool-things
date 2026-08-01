@@ -34,7 +34,7 @@ PCT_INT=$(awk -v p="$PCT" 'BEGIN{printf "%d",(p+0.5)}')
 #   EMPTY = lightest → remaining portion
 read MR MG MB < <(awk -v p="$PCT" 'BEGIN{ if(p<0)p=0; if(p>100)p=100; if(p<=50){printf "%d 255 0", int(p/50*255)}else{printf "255 %d 0", int((100-p)/50*255)} }')
 MAIN=$(printf '\033[38;2;%d;%d;%dm' "$MR" "$MG" "$MB")
-read IL IG IB < <(awk -v r="$MR" -v g="$MG" -v b="$MB" 'BEGIN{ t=0.25; printf "%d %d %d", int(r+(255-r)*t), int(g+(255-g)*t), int(b+(255-b)*t) }')
+read IL IG IB < <(awk -v r="$MR" -v g="$MG" -v b="$MB" 'BEGIN{ t=0.5; printf "%d %d %d", int(r+(255-r)*t), int(g+(255-g)*t), int(b+(255-b)*t) }')
 LIGHT=$(printf '\033[38;2;%d;%d;%dm' "$IL" "$IG" "$IB")
 read EL EG EB < <(awk -v r="$MR" -v g="$MG" -v b="$MB" 'BEGIN{ t=0.85; printf "%d %d %d", int(r+(255-r)*t), int(g+(255-g)*t), int(b+(255-b)*t) }')
 EMPTY=$(printf '\033[38;2;%d;%d;%dm' "$EL" "$EG" "$EB")
