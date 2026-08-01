@@ -1,18 +1,18 @@
 #!/bin/bash
-# Claude Code statusline — model · effort · fast · dir · git · context window (in/out split) · spend · time
+# Claude Code statusline — model · effort · fast · dir · git · context window (in/out split) · time
 # Receives session JSON on stdin. Requires jq (awk + git optional).
 input=$(cat)
 
 MODEL=$(echo "$input"  | jq -r '.model.display_name // "Claude"')
 MODEL_ID=$(echo "$input" | jq -r '.model.id // ""')
 DIR=$(echo "$input"    | jq -r '.workspace.current_dir // .cwd // ""')
-COST=$(echo "$input"   | jq -r '.cost.total_cost_usd // 0')
 DUR_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 INPUT_TOKENS=$(echo "$input"  | jq -r '.context_window.total_input_tokens // 0')
 OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 SIZE=$(echo "$input"   | jq -r '.context_window.context_window_size // 200000')
 EFF=$(echo "$input"    | jq -r '.effort.level // empty')
 FAST=$(echo "$input"   | jq -r '.fast_mode // false')
+TRANSCRIPT_PATH=$(echo "$input" | jq -r '.transcript_path // ""')
 
 # GLM models: Claude Code reports a generic 200K for unknown models. Pin verified values.
 case "$MODEL_ID" in
@@ -83,6 +83,49 @@ tok_fmt() {
   if [ "$t" -lt 1000 ]; then printf "%d" "$t"
   else awk "BEGIN{printf \"%.1fk\", $t/1000}"; fi
 }
+
+# Model -> context window size. GLM family pinned (verified 200K); unknown falls
+# back to 200K (same default the main session uses when the payload omits a size).
+size_for_model() {
+  case "$1" in
+    *glm-5.1*|*glm-4.7*|*glm-5.2*) echo 200000 ;;
+    *) echo 200000 ;;
+  esac
+}
+
+# Effort level -> 5-dot meter (matches the main effort badge).
+effort_dots() {
+  case "$1" in
+    low)    printf '●○○○○' ;;
+    medium) printf '●●○○○' ;;
+    high)   printf '●●●○○' ;;
+    xhigh)  printf '●●●●○' ;;
+    max)    printf '●●●●●' ;;
+    *)      printf '%s' "$1" ;;
+  esac
+}
+
+# Portable file mtime in epoch seconds (macOS BSD stat -f %m vs Linux GNU stat -c %Y).
+_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+
+# Compact 8-cell gradient bar (green->red by %) for one subagent's context usage.
+sub_bar() {
+  read r g b lv < <(awk -v u="$1" -v s="$2" 'BEGIN{
+    p=(s>0)?u/s*100:0; if(p<0)p=0; if(p>100)p=100;
+    if(p<=50){r=int(p/50*255);g=255;b=0}else{r=255;g=int((100-p)/50*255);b=0}
+    lv=int(p/100*64+0.5); if(lv>64)lv=64; printf "%d %d %d %d",r,g,b,lv
+  }')
+  local col=$(printf '\033[38;2;%d;%d;%dm' "$r" "$g" "$b")
+  local bar="" c base filled
+  for ((c=0;c<8;c++)); do
+    base=$((c*8))
+    if   [ "$lv" -ge $((base+8)) ]; then bar+="${col}█"
+    elif [ "$lv" -gt  "$base" ];   then filled=$((lv-base)); bar+="${col}${EIGHTS[$((filled-1))]}"
+    else bar+="${D}░"; fi
+  done
+  printf '%s%s' "$bar" "$X"
+}
+
 in_k=$(tok_fmt "$INPUT_TOKENS"); out_k=$(tok_fmt "$OUTPUT_TOKENS")
 size_k=$(awk "BEGIN{printf \"%dk\", $SIZE/1000}")
 
@@ -92,7 +135,6 @@ if [ "$T" -ge 6000 ]; then
 else
   printf -v T_FMT "%dm%02ds" $((T/60)) $((T%60))
 fi
-COST_FMT=$(printf '$%.2f' "$COST")
 
 # Git branch (only when inside a repo)
 BRANCH=""
@@ -108,13 +150,13 @@ case "$EFF" in
   *)      EFF_S="$EFF" ;;
 esac
 TAG=""
-[ -n "$EFF" ] && TAG=" ${D}🧠 ${EFF_S}${X}"
+[ -n "$EFF" ] && TAG=" ${D}${EFF_S}${X}"
 if [ "$FAST" = "true" ]; then
   # bolt sits flush against the effort meter; standalone (with a leading space) otherwise
   [ -n "$TAG" ] && TAG="${TAG}${Y}⚡${X}" || TAG=" ${Y}⚡${X}"
 fi
 
-# Dim separator between major groups (model · location · context · spend · time · greeting)
+# Dim separator between major groups (model · location · context · time · greeting)
 SEP=" ${D}│${X} "
 
 # Time-of-day greeting — per-hour rotation (local time). Seed = hour + day-of-year,
@@ -134,4 +176,43 @@ G_I=$(awk -v seed="$(( 10#$HOUR*1000 + 10#$DOY ))" -v n="$G_N" 'BEGIN{srand(seed
 GREET="${SEP}${G_E} ${D}${G_MSGS[$G_I]}${X}"
 
 CTX="${D}(${LIGHT}↑${D}${in_k} ${MAIN}↓${D}${out_k}/${size_k})${X}"
-printf "%b" "🤖 ${B}${C}${MODEL}${X}${TAG}${SEP}📁 ${DIR##*/}${BRANCH}${SEP}${BAR}${X} ${PCT_INT}% ${CTX}${SEP}💸 ${Y}${COST_FMT}${X}${SEP}⏱️ ${T_FMT}${GREET}\n"
+
+# Subagent rows: one line per currently-running subagent (transcript mtime within
+# SUB_STALE seconds). While any run, the greeting is hidden to make room; it
+# returns when idle. SUB_STALE is env-tunable (default 15s).
+SUB_STALE="${SUB_STALE:-15}"
+SUB_LINES=""
+SUB_DIR="${TRANSCRIPT_PATH%.jsonl}/subagents"
+if [ -d "$SUB_DIR" ]; then
+  _now=$(date +%s); _n=0; _extra=0
+  while IFS= read -r _af; do
+    [ -z "$_af" ] && continue
+    _mt=$(_mtime "$_af"); [ -z "$_mt" ] && continue
+    [ $((_now - _mt)) -ge "$SUB_STALE" ] && continue
+    _n=$((_n + 1))
+    if [ "$_n" -gt 3 ]; then _extra=$((_extra + 1)); continue; fi
+    _meta="${_af%.jsonl}.meta.json"
+    _atype=$(jq -r '.agentType // "subagent"' "$_meta" 2>/dev/null)
+    _desc=$(jq -r '.description // ""' "$_meta" 2>/dev/null); _desc=${_desc:0:40}
+    _last=$(jq -c 'select(.type=="assistant") | {m:(.message.model//""), u:.message.usage, e:(.effort|if type=="object" then (.level//"") elif type=="string" then . else "" end)}' "$_af" 2>/dev/null | tail -1)
+    read _inctx _out _smodel _seff < <(printf '%s' "$_last" | jq -r '[(.u.input_tokens//0)+(.u.cache_creation_input_tokens//0)+(.u.cache_read_input_tokens//0),(.u.output_tokens//0),.m,(.e//"")]|@tsv' 2>/dev/null)
+    _name="$_atype"; [ -n "$_desc" ] && _name="$_atype · $_desc"
+    _line="  ${D}↳${X} ${C}${_name}${X}"
+    [ -n "$_smodel" ] && _line+=" ${SEP}🤖 ${D}${_smodel}${X}"
+    [ -n "$_seff" ]   && _line+=" ${SEP}${D}$(effort_dots "$_seff")${X}"
+    if [ -z "$_inctx" ]; then
+      _line+=" ${D}starting…${X}"
+    else
+      _ssize=$(size_for_model "$_smodel")
+      _used=$((_inctx + _out))
+      _line+=" ${SEP}$(sub_bar "$_used" "$_ssize") ${D}$(tok_fmt "$_used")${X}"
+    fi
+    SUB_LINES+="${_line}\n"
+  done < <(ls -t "$SUB_DIR"/agent-*.jsonl 2>/dev/null)
+  [ "$_extra" -gt 0 ] && SUB_LINES+="  ${D}↳ … +${_extra} more${X}\n"
+fi
+[ -n "$SUB_LINES" ] && GREET=""
+
+printf "%b" "🤖 ${B}${C}${MODEL}${X}${TAG}${SEP}📁 ${DIR##*/}${BRANCH}${SEP}${BAR}${X} ${PCT_INT}% ${CTX}${SEP}⏱️ ${T_FMT}${GREET}\n"
+[ -n "$SUB_LINES" ] && printf '%b' "$SUB_LINES"
+exit 0

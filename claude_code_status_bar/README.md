@@ -4,16 +4,16 @@ A custom, info-dense statusline for [Claude Code](https://claude.com/claude-code
 
 ![statusline preview](./preview.png)
 
-It reads the session JSON Claude Code pipes in on stdin and renders a single
-colored line:
+It reads the session JSON Claude Code pipes in on stdin and renders a colored
+status line — plus one extra line per currently-running subagent:
 
 ```
-🤖 model  🧠 ●●○○○  ⚡  │  📁 folder > 🌿 branch  │  ▰▰▰▰▰▱▱▱▱ NN% (↑Nk ↓Nk/total)  │  💸 $cost  │  ⏱️ session time  │  🌅 greeting
+🤖 model  ●●○○○  ⚡  │  📁 folder > 🌿 branch  │  ▰▰▰▰▰▱▱▱▱ NN% (↑Nk ↓Nk/total)  │  ⏱️ session time  │  🌅 greeting
 ```
 
 ## What it shows
 
-- **Model** (cyan, bold) plus optional badges: `🧠 ●●○○○` effort, shown as a
+- **Model** (cyan, bold) plus optional badges: `●●○○○` effort, shown as a
   compact 5-dot meter (`●`/`○` from low → max), and a bare `⚡` for fast mode.
 - **Location** — current folder and git branch, joined by `>`.
 - **Context bar** — 10 blocks × 8 sub-steps (80 levels). The filled portion
@@ -22,13 +22,32 @@ colored line:
   (green → yellow → red). Followed by `NN% (↑Nk ↓Nk/total)` — the arrows are
   tinted to match the bar (light ↑ = input, dark ↓ = output), and counts under
   1k show as a raw integer so output is always visible.
-- **Spend** — session cost in USD.
 - **Session time** — `MmSSs`, flipping to `HhMMm` once it passes 100 minutes.
 - **Greeting** — a time-of-day emoji + a short, playful message that rotates per
   clock-hour and per day, across 6 buckets:
   `😴` late night · `🌅` dawn · `☀️` morning · `🌤️` afternoon · `🌆` evening · `🌙` night
 
 Major groups are separated by a dim `│`.
+
+## Subagents
+
+While one or more subagents are running, each gets its own line beneath the main
+status line (and the greeting steps aside to make room):
+
+```
+  ↳ agentType · description  │  🤖 model  │  ●●○○○ effort  │  ▰▰▰▱▱▱▱▱ Nk
+```
+
+The row shows the agent **type** and **description**, its **model**, an
+**effort** meter, and a compact context-usage **bar** + token count. Up to three
+subagents are shown at once; the rest collapse into `↳ … +N more`.
+
+Detection is file-based: the script reads each subagent's transcript under the
+session's `subagents/` directory and treats one as "running" when its transcript
+was written to within the last `SUB_STALE` seconds (default `15`,
+env-tunable). Rows vanish a few seconds after the subagent finishes. Claude Code
+does not pass a "viewed subagent" signal in the status payload, so this is the
+most accurate trigger available.
 
 ## Install
 
@@ -55,8 +74,10 @@ Requires `jq` (and `git` for the branch segment).
 - Token counts are cached per session, so the context bar holds steady while a
   reply is generating instead of flickering to 0 (Claude Code omits the
   `context_window` fields mid-turn). Cache lives in `$TMPDIR/cc-statusline/`.
+- The script always exits `0`; Claude Code blanks the statusline on a non-zero
+  exit, so this guard keeps it visible even when no subagents are running.
 - Built against the **z.ai GLM proxy**; on that backend `rate_limits.*` won't
-  appear and live cost may read `$0.00`. Works on plain Anthropic too.
+  appear. Works on plain Anthropic too.
 - Some backends report a generic 200K window for unknown models, so the script
   pins known GLM sizes in a `case` block — adjust it for your own models.
 - `settings.example.json` ships with the auth token **redacted** — never commit a
