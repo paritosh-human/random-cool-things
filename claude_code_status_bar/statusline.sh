@@ -1,40 +1,78 @@
 #!/bin/bash
-# Claude Code statusline — model · effort · fast · dir · git · context window · spend · time
+# Claude Code statusline — model · effort · fast · dir · git · context window (in/out split) · spend · time
 # Receives session JSON on stdin. Requires jq (awk + git optional).
 input=$(cat)
 
 MODEL=$(echo "$input"  | jq -r '.model.display_name // "Claude"')
+MODEL_ID=$(echo "$input" | jq -r '.model.id // ""')
 DIR=$(echo "$input"    | jq -r '.workspace.current_dir // .cwd // ""')
 COST=$(echo "$input"   | jq -r '.cost.total_cost_usd // 0')
 DUR_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
-PCT=$(echo "$input"    | jq -r '.context_window.used_percentage // 0')
-USED=$(echo "$input"   | jq -r '.context_window.total_input_tokens // 0')
+INPUT_TOKENS=$(echo "$input"  | jq -r '.context_window.total_input_tokens // 0')
+OUTPUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
 SIZE=$(echo "$input"   | jq -r '.context_window.context_window_size // 200000')
 EFF=$(echo "$input"    | jq -r '.effort.level // empty')
 FAST=$(echo "$input"   | jq -r '.fast_mode // false')
 
+# GLM models: Claude Code reports a generic 200K for unknown models. Pin verified values.
+case "$MODEL_ID" in
+  *glm-5.1*)   SIZE=200000 ;;   # verified 200K context
+  *glm-4.7*)   SIZE=200000 ;;   # verified 200K context
+esac
+
 # ANSI colors
 C='\033[36m'; G='\033[32m'; Y='\033[33m'; R='\033[31m'; D='\033[90m'; B='\033[1m'; X='\033[0m'
 
-# Context bar: single shade from % (green→yellow→red). 10 blocks × 8 sub-steps = 80 levels.
-# filled = solid shade; edge = partial block ▏▎▍▌▋▊▉; empty = light tint of the same hue.
+# ---- context window: input (light) → output (dark) → remaining (lightest) ----
+USED=$((INPUT_TOKENS + OUTPUT_TOKENS))
+PCT=$(awk -v u="$USED" -v s="$SIZE" 'BEGIN{ if(s>0) printf "%.2f", u/s*100; else print 0 }')
 PCT_INT=$(awk -v p="$PCT" 'BEGIN{printf "%d",(p+0.5)}')
-W=10; FS=$(awk -v p="$PCT" -v s="$((W*8))" 'BEGIN{printf "%d",(p/100*s)+0.5}')
-FULL=$((FS/8)); REM=$((FS%8))
+
+# Base hue from overall usage (green→yellow→red). Three shades derived from it:
+#   MAIN  = darkest  → output portion
+#   LIGHT = medium   → input portion
+#   EMPTY = lightest → remaining portion
 read MR MG MB < <(awk -v p="$PCT" 'BEGIN{ if(p<0)p=0; if(p>100)p=100; if(p<=50){printf "%d 255 0", int(p/50*255)}else{printf "255 %d 0", int((100-p)/50*255)} }')
-read LR LG LB < <(awk -v r="$MR" -v g="$MG" -v b="$MB" 'BEGIN{ t=0.6; printf "%d %d %d", int(r+(255-r)*t), int(g+(255-g)*t), int(b+(255-b)*t) }')
 MAIN=$(printf '\033[38;2;%d;%d;%dm' "$MR" "$MG" "$MB")
-LIGHT=$(printf '\033[38;2;%d;%d;%dm' "$LR" "$LG" "$LB")
+read IL IG IB < <(awk -v r="$MR" -v g="$MG" -v b="$MB" 'BEGIN{ t=0.25; printf "%d %d %d", int(r+(255-r)*t), int(g+(255-g)*t), int(b+(255-b)*t) }')
+LIGHT=$(printf '\033[38;2;%d;%d;%dm' "$IL" "$IG" "$IB")
+read EL EG EB < <(awk -v r="$MR" -v g="$MG" -v b="$MB" 'BEGIN{ t=0.85; printf "%d %d %d", int(r+(255-r)*t), int(g+(255-g)*t), int(b+(255-b)*t) }')
+EMPTY=$(printf '\033[38;2;%d;%d;%dm' "$EL" "$EG" "$EB")
+
+# Sub-step positions across W blocks × 8 sub-steps (W*8 levels map to SIZE tokens)
+W=10; TOT=$((W*8))
+IN_FS=$(awk -v i="$INPUT_TOKENS" -v s="$SIZE" -v tot="$TOT" 'BEGIN{ v=int(i/s*tot+0.5); if(v<0)v=0; if(v>tot)v=tot; print v }')
+OUT_FS=$(awk -v o="$OUTPUT_TOKENS" -v s="$SIZE" -v tot="$TOT" 'BEGIN{ v=int(o/s*tot+0.5); if(v<0)v=0; if(v>tot)v=tot; print v }')
+[ "$((IN_FS + OUT_FS))" -gt "$TOT" ] && OUT_FS=$((TOT - IN_FS))   # never overflow the bar
+[ "$OUT_FS" -lt 0 ] && OUT_FS=0
+# A small but nonzero output should still be visible as one sub-step
+[ "$OUTPUT_TOKENS" -gt 0 ] && [ "$OUT_FS" -eq 0 ] && OUT_FS=1
+
 EIGHTS=(▏ ▎ ▍ ▌ ▋ ▊ ▉)
 BAR=""
 for ((c=0; c<W; c++)); do
-  if   [ "$c" -lt "$FULL" ]; then BAR+="${MAIN}█"
-  elif [ "$c" -eq "$FULL" ] && [ "$REM" -gt 0 ]; then BAR+="${MAIN}${EIGHTS[$((REM-1))]}"
-  else BAR+="${LIGHT}░"; fi
+  start=$((c*8)); end=$((start+8))
+  filled=0; col=""
+  for ((s=start; s<end; s++)); do
+    if   [ "$s" -lt "$IN_FS" ];               then filled=$((filled+1)); col="$LIGHT"   # input
+    elif [ "$s" -lt "$((IN_FS + OUT_FS))" ];  then filled=$((filled+1)); col="$MAIN"    # output
+    else break; fi
+  done
+  if   [ "$filled" -ge 8 ]; then BAR+="${col}█"
+  elif [ "$filled" -gt 0 ]; then BAR+="${col}${EIGHTS[$((filled-1))]}"
+  else BAR+="${EMPTY}░"; fi
 done
 
-used_k=$(awk "BEGIN{printf \"%.1fk\",$USED/1000}")
-size_k=$(awk "BEGIN{printf \"%dk\",$SIZE/1000}")
+# Token → readable string: raw int below 1k, else "N.Nk"
+tok_fmt() {
+  local t=$1
+  [ -z "$t" ] && { echo 0; return; }
+  if [ "$t" -lt 1000 ]; then printf "%d" "$t"
+  else awk "BEGIN{printf \"%.1fk\", $t/1000}"; fi
+}
+in_k=$(tok_fmt "$INPUT_TOKENS"); out_k=$(tok_fmt "$OUTPUT_TOKENS")
+size_k=$(awk "BEGIN{printf \"%dk\", $SIZE/1000}")
+
 T=$((DUR_MS/1000))
 if [ "$T" -ge 6000 ]; then
   printf -v T_FMT "%dh%02dm" $((T/3600)) $(((T%3600)/60))   # ≥100 min → hours
@@ -65,7 +103,8 @@ case "$HOUR" in
   2[1-3])      G_E="🌙";  G_MSGS=( "Wind down. Save the file." "Good night. Push first." "Tomorrow-you thanks present-you." "Log off. The code will wait." "Dream in clean architecture." "Commit, push, sleep. Repeat." );;
   *)           G_E="✨";  G_MSGS=( "Keep going." );;
 esac
-G_I=$(awk -v seed="$(( 10#$HOUR*1000 + 10#$DOY ))" -v n="${#G_MSGS[@]}" 'BEGIN{srand(seed+0); print int(rand()*n)}')
+G_N=${#G_MSGS[@]}
+G_I=$(awk -v seed="$(( 10#$HOUR*1000 + 10#$DOY ))" -v n="$G_N" 'BEGIN{srand(seed+0); print int(rand()*n)}')
 GREET="${SEP}${G_E} ${D}${G_MSGS[$G_I]}${X}"
 
-printf "%b" "🤖 ${B}${C}${MODEL}${X}${TAG}${SEP}📁 ${DIR##*/}${BRANCH}${SEP}${BAR}${X} ${PCT_INT}% ${D}(${used_k}/${size_k})${X}${SEP}💸 ${Y}${COST_FMT}${X}${SEP}⏱️ ${T_FMT}${GREET}\n"
+printf "%b" "🤖 ${B}${C}${MODEL}${X}${TAG}${SEP}📁 ${DIR##*/}${BRANCH}${SEP}${BAR}${X} ${PCT_INT}% ${D}(${in_k} in + ${out_k} out / ${size_k})${X}${SEP}💸 ${Y}${COST_FMT}${X}${SEP}⏱️ ${T_FMT}${GREET}\n"

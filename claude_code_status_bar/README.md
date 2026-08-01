@@ -8,16 +8,18 @@ It reads the session JSON Claude Code pipes in on stdin and renders a single
 colored line:
 
 ```
-🤖 model  🧠 effort  ⚡fast  │  📁 folder > 🌿 branch  │  ▰▰▰▰▱▱▱▱▱▱ NN% (used/total)  │  💸 $cost  │  ⏱️ session time  │  🌅 greeting
+🤖 model  🧠 effort  ⚡fast  │  📁 folder > 🌿 branch  │  ▰▰▰▰▰▱▱▱▱ NN% (Nk in + Nk out / total)  │  💸 $cost  │  ⏱️ session time  │  🌅 greeting
 ```
 
 ## What it shows
 
 - **Model** (cyan, bold) plus optional `🧠 effort` and `⚡ fast` badges.
 - **Location** — current folder and git branch, joined by `>`.
-- **Context bar** — 10 blocks × 8 sub-steps (80 levels). A single shade computed
-  from `% used` (green → yellow → red); empty blocks are a light tint of the same
-  hue. Followed by `NN% (used/total)`.
+- **Context bar** — 10 blocks × 8 sub-steps (80 levels). The filled portion
+  splits into **input** (lighter shade) then **output** (darker shade); the rest
+  is the lightest tint. All three derive from one hue computed from `% used`
+  (green → yellow → red). Followed by `NN% (Nk in + Nk out / total)` — counts
+  under 1k show as a raw integer so output is always visible.
 - **Spend** — session cost in USD.
 - **Session time** — `MmSSs`, flipping to `HhMMm` once it passes 100 minutes.
 - **Greeting** — a time-of-day emoji + a short, playful message that rotates per
@@ -50,5 +52,7 @@ Requires `jq` (and `git` for the branch segment).
   **zero tokens**.
 - Built against the **z.ai GLM proxy**; on that backend `rate_limits.*` won't
   appear and live cost may read `$0.00`. Works on plain Anthropic too.
+- Some backends report a generic 200K window for unknown models, so the script
+  pins known GLM sizes in a `case` block — adjust it for your own models.
 - `settings.example.json` ships with the auth token **redacted** — never commit a
   real token.
