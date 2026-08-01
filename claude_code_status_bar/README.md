@@ -8,7 +8,7 @@ It reads the session JSON Claude Code pipes in on stdin and renders a single
 colored line:
 
 ```
-🤖 model  🧠 effort  ⚡fast  │  📁 folder > 🌿 branch  │  ▰▰▰▰▰▱▱▱▱ NN% (Nk in + Nk out / total)  │  💸 $cost  │  ⏱️ session time  │  🌅 greeting
+🤖 model  🧠 effort  ⚡fast  │  📁 folder > 🌿 branch  │  ▰▰▰▰▰▱▱▱▱ NN% (↑Nk ↓Nk/total)  │  💸 $cost  │  ⏱️ session time  │  🌅 greeting
 ```
 
 ## What it shows
@@ -18,8 +18,9 @@ colored line:
 - **Context bar** — 10 blocks × 8 sub-steps (80 levels). The filled portion
   splits into **input** (lighter shade) then **output** (darker shade); the rest
   is the lightest tint. All three derive from one hue computed from `% used`
-  (green → yellow → red). Followed by `NN% (Nk in + Nk out / total)` — counts
-  under 1k show as a raw integer so output is always visible.
+  (green → yellow → red). Followed by `NN% (↑Nk ↓Nk/total)` — the arrows are
+  tinted to match the bar (light ↑ = input, dark ↓ = output), and counts under
+  1k show as a raw integer so output is always visible.
 - **Spend** — session cost in USD.
 - **Session time** — `MmSSs`, flipping to `HhMMm` once it passes 100 minutes.
 - **Greeting** — a time-of-day emoji + a short, playful message that rotates per

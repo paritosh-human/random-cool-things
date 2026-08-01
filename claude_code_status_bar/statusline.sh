@@ -107,4 +107,5 @@ G_N=${#G_MSGS[@]}
 G_I=$(awk -v seed="$(( 10#$HOUR*1000 + 10#$DOY ))" -v n="$G_N" 'BEGIN{srand(seed+0); print int(rand()*n)}')
 GREET="${SEP}${G_E} ${D}${G_MSGS[$G_I]}${X}"
 
-printf "%b" "🤖 ${B}${C}${MODEL}${X}${TAG}${SEP}📁 ${DIR##*/}${BRANCH}${SEP}${BAR}${X} ${PCT_INT}% ${D}(${in_k} in + ${out_k} out / ${size_k})${X}${SEP}💸 ${Y}${COST_FMT}${X}${SEP}⏱️ ${T_FMT}${GREET}\n"
+CTX="${D}(${LIGHT}↑${D}${in_k} ${MAIN}↓${D}${out_k}/${size_k})${X}"
+printf "%b" "🤖 ${B}${C}${MODEL}${X}${TAG}${SEP}📁 ${DIR##*/}${BRANCH}${SEP}${BAR}${X} ${PCT_INT}% ${CTX}${SEP}💸 ${Y}${COST_FMT}${X}${SEP}⏱️ ${T_FMT}${GREET}\n"
